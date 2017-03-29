@@ -167,7 +167,7 @@ class MinimaxAgent(MultiAgentSearchAgent):
     numGhosts = gameState.getNumAgents() - 1
     actions = gameState.getLegalActions(0)
     actions.remove(Directions.STOP)
-    resAction = None
+    resAction = Directions.STOP
     score = -float("inf")
     for action in actions:
       newScore = minNode(gameState.generateSuccessor(0, action), 1, self.depth, numGhosts)
@@ -194,11 +194,10 @@ class AlphaBetaAgent(MultiAgentSearchAgent):
       if gameState.isWin() or gameState.isLose() or depth == 0:
         return self.evaluationFunction(gameState)
       actions = gameState.getLegalActions(0)
-      #actions.remove(Directions.STOP)
-      score = -float("inf")
+      maxScore = -float("inf")
       for action in actions:
         node = minNode(gameState.generateSuccessor(0, action), 1, depth - 1, numGhosts, alpha, beta)
-        maxScore = max(score, node)
+        maxScore = max(maxScore, node)
         if maxScore >= beta:
           return maxScore
         alpha = max(alpha, maxScore)
@@ -207,19 +206,19 @@ class AlphaBetaAgent(MultiAgentSearchAgent):
     def minNode(gameState, agent, depth, numGhosts, alpha, beta):
       if gameState.isWin() or gameState.isLose() or depth == 0:
         return self.evaluationFunction(gameState)
-      score = float("inf")
+      minScore = float("inf")
       actions = gameState.getLegalActions(agent)
       if agent == numGhosts:
         for action in actions:
           node = maxNode(gameState.generateSuccessor(agent, action), depth - 1, numGhosts, alpha, beta)
-          minScore = min(score, node)
+          minScore = min(minScore, node)
           if minScore <= alpha:
             return minScore
           beta = min(beta, minScore)
       else:
         for action in actions:
-          node = maxNode(gameState.generateSuccessor(agent, action), depth - 1, numGhosts, alpha, beta)
-          minScore = min(score, node)
+          node = minNode(gameState.generateSuccessor(agent, action), agent + 1, depth - 1, numGhosts, alpha, beta)
+          minScore = min(minScore, node)
           if minScore <= alpha:
             return minScore
           beta = min(beta, minScore)
@@ -227,8 +226,7 @@ class AlphaBetaAgent(MultiAgentSearchAgent):
 
     numGhosts = gameState.getNumAgents() - 1
     actions = gameState.getLegalActions(0)
-    #actions.remove(Directions.STOP)
-    resAction = None
+    resAction = Directions.STOP
     score = -float("inf")
     alpha = -float("inf")
     beta = float("inf")
@@ -255,7 +253,35 @@ class ExpectimaxAgent(MultiAgentSearchAgent):
       legal moves.
     """
     "*** YOUR CODE HERE ***"
-    util.raiseNotDefined()
+    def maxNode(gameState, depth, numGhosts):
+      if gameState.isWin() or gameState.isLose() or depth == 0:
+        return self.evaluationFunction(gameState)
+      actions = gameState.getLegalActions(0)
+      expValues = [expValue(gameState.generateSuccessor(0, action), 1, depth) for action in actions]
+      return max(expValues)
+
+    def expValue(gameState, agent, depth):
+      if gameState.isWin() or gameState.isLose():
+        return self.evaluationFunction(gameState)
+      numGhosts = gameState.getNumAgents() - 1
+      actions = gameState.getLegalActions(agent)
+      prob = float(1) / len(actions)
+      if agent == numGhosts:
+        values = [maxNode(gameState.generateSuccessor(agent, action), depth - 1, numGhosts) for action in actions]
+      else:
+        values = [expValue(gameState.generateSuccessor(agent, action), agent + 1, depth) for action in actions]
+      value = sum(values)
+      return prob * value
+
+    actions = gameState.getLegalActions(0)
+    resAction = Directions.STOP
+    score = -float("inf")
+    for action in actions:
+      newScore = expValue(gameState.generateSuccessor(0, action), 1, self.depth)
+      if newScore > score:
+        score = newScore
+        resAction = action
+    return resAction
 
 def betterEvaluationFunction(currentGameState):
   """
@@ -263,9 +289,64 @@ def betterEvaluationFunction(currentGameState):
     evaluation function (question 5).
 
     DESCRIPTION: <write something here so we know what you did>
+    The first thing I did was to include two special cases for win and loss to ensure
+    they were always the highest and lowest scores, respectively.
+
+    Next, I gathered the food positions, ghost states (whether they were scared), and
+    the capsule locations. I initialized the score to the value of the scoreEvaluationFunction
+    so that better game scores had a higher chance of being picked.
+
+    the first calculation was distance to a ghost. If the ghost was scared, I wanted pacman
+    to be as near as possible. It was less important to be far away if the ghost was not scared.
+
+    Next, I decided that it was fairly important for Pacman to always be near a food item, and updated
+    the score based on the minimum food distance appropriately.
+
+    Lastly, I added to the score if Pacman did not eat a capsule while at least one scared
+    ghost remained, and subtracted if capsules remained with no scared ghosts.
+
+    The weights were all decided through trial and error, although their general relation to one
+    another (higher/lower) did not really change throughout the process.
   """
   "*** YOUR CODE HERE ***"
-  util.raiseNotDefined()
+  # Special cases to encourage winning/discourage losing
+  if currentGameState.isWin():
+    return float("inf")
+  if currentGameState.isLose():
+    return -float("inf")
+
+  # Needed state values
+  pos = currentGameState.getPacmanPosition()
+  food = currentGameState.getFood()
+  foodPos = food.asList()
+  numGhosts = currentGameState.getNumAgents() - 1
+  ghostStates = currentGameState.getGhostStates()
+  scaredTimes = [ghostState.scaredTimer for ghostState in ghostStates]
+  capsules = currentGameState.getCapsules()
+
+  score = scoreEvaluationFunction(currentGameState)
+
+  for i in range(1, numGhosts + 1):
+    ghostPos = currentGameState.getGhostPosition(i)
+    dist = util.manhattanDistance(pos, ghostPos)
+    if scaredTimes[i - 1] > 0:
+      # Ghost is scared, want to be close
+      score -= 3 * dist
+    else:
+      score += dist
+
+  foodDistances = [util.manhattanDistance(pos, foodPosition) for foodPosition in foodPos]
+  minFoodDist = min(foodDistances)
+  score -= 2 * minFoodDist
+
+  if max(scaredTimes) > 0:
+    score += 2.5 * len(capsules)
+  else:
+    score -= 2.5 * len(capsules)
+
+  return score
+
+
 
 # Abbreviation
 better = betterEvaluationFunction
